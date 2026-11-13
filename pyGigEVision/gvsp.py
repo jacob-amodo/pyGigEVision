@@ -365,6 +365,8 @@ class GVSPReceiver:
         self._stop_event = threading.Event()
         self._frame_buffers: dict[int, _FrameBuffer] = {}
         self._resend_stats = {"requested": 0, "recovered": 0, "failed": 0}
+        self._warned_at = float("-inf")
+        self._unwarned: list[int] = []
         self.resend_enabled = True
 
         # Resend req_id counter (for direct resend from stream socket)
@@ -659,9 +661,13 @@ class GVSPReceiver:
         missing = buf.missing_packets()
         if missing:
             self._resend_stats["failed"] += len(missing)
+            self._unwarned.append(len(missing))
+        if self._unwarned and time.monotonic() - self._warned_at >= 10:
+            self._warned_at = time.monotonic()
             logger.warning(
-                f"Frame {block_id}: {len(missing)}/{buf.expected_packets} packets unrecoverable"
+                f"Packets unrecoverable: {sum(self._unwarned)} (frames: {len(self._unwarned)})"
             )
+            self._unwarned.clear()
 
         # Count packets that were resend-requested and ultimately arrived.
         if buf._resend_requested and buf._received is not None:
